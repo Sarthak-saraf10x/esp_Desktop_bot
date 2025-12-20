@@ -11,6 +11,5 @@
 		"ostream": "cpp",
 		"sstream": "cpp",
 		"cmath": "cpp"
-	},
-	"idf.pythonInstallPath": "/home/jahrulnr/miniconda3/bin/python"
+	}
 }

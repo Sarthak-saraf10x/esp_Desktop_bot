@@ -1,17 +1,24 @@
 #ifndef BOOT_CONSTANTS_H
 #define BOOT_CONSTANTS_H
 
-#include "esp32-hal-sr.h"
+#include "csr.h"
+
+#define SR_CMD_STR_LEN_MAX     64
+#define SR_CMD_PHONEME_LEN_MAX 64
+
+// Voice command IDs
+enum CommandId {
+    CMD_TIME = 0,
+    CMD_WEATHER,
+    CMD_RECORD_AUDIO,
+    CMD_MAX
+};
 
 // Define voice commands (phonetic representations)
-static const sr_cmd_t voice_commands[] = {
-	{0, "Turn on the light", "TkN nN jc LiT"},
-	{0, "Switch on the light", "SWgp nN jc LiT"},
-	{1, "Turn off the light", "TkN eF jc LiT"},
-	{1, "Switch off the light", "SWgp eF jc LiT"},
-	{1, "Go dark", "Gb DnRK"},
-	{2, "Start fan", "STnRT FaN"},
-	{3, "Stop fan", "STnP FaN"},
+static const SR::csr_cmd_t voice_commands[] = {
+	{CMD_TIME, "time",    "TiM"},
+	{CMD_WEATHER, "weather", "Wfjk"},
+	{CMD_RECORD_AUDIO, "record audio", "RfKkD nDmb"}
 };
 
 static const char* NOTIFICATION_WAKEWORD = "wakeword";

@@ -1,14 +1,11 @@
 #pragma once
 
-#define SCL_PIN SCL
+#define SCL_PIN 3
 #define SDA_PIN SDA
-
-#define MIC_TYPE_I2S 0
-#define MIC_TYPE_ANALOG 1
 
 // set to analog or i2s microphone
 // #define MIC_TYPE MIC_TYPE_ANALOG
-#define MIC_TYPE MIC_TYPE_I2S
+#define MIC_TYPE MIC_I2S
 
 // i2s microphone
 #ifdef SEED_XIAO_ESP32S3
@@ -16,9 +13,9 @@
 #define MIC_WS  GPIO_NUM_NC
 #define MIC_DIN GPIO_NUM_41
 #else
-#define MIC_SCK GPIO_NUM_41
-#define MIC_WS  GPIO_NUM_42
-#define MIC_DIN GPIO_NUM_2
+#define MIC_SCK GPIO_NUM_13
+#define MIC_WS  GPIO_NUM_12
+#define MIC_DIN GPIO_NUM_11
 #endif
 
 // analog microphone
