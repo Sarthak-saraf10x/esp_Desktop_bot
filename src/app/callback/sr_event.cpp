@@ -1,28 +1,36 @@
 #include "app/callback_list.h"
+#include "app/tasks.h"
+#include "Speaker.h"
 
 // Event callback for SR system
 void sr_event_callback(void *arg, sr_event_t event, int command_id, int phrase_id) {
     switch (event) {
         case SR_EVENT_WAKEWORD:
             Serial.println("🎙️ Wake word 'Hi ESP' detected!");
-            if (notification) {
-                notification->send(NOTIFICATION_DISPLAY, (void*)EVENT_DISPLAY_WAKEWORD);
+#ifdef ENABLE_SPEAKER_FEEDBACK
+            GlobalSpeaker.playChime();
+#endif
+            // Trigger conversation task
+            if (convTaskHandle != nullptr) {
+                xTaskNotifyGive(convTaskHandle);
             }
-            // Switch to command listening mode
-            SR::sr_set_mode(SR_MODE_COMMAND);
-            Serial.println("📞 Listening for commands...");
             break;
 
         case SR_EVENT_WAKEWORD_CHANNEL:
             Serial.printf("🎙️ Wake word detected on channel: %d\n", command_id);
-            if (notification) {
-                notification->send(NOTIFICATION_DISPLAY, (void*)EVENT_DISPLAY_WAKEWORD);
+#ifdef ENABLE_SPEAKER_FEEDBACK
+            GlobalSpeaker.playChime();
+#endif
+            if (convTaskHandle != nullptr) {
+                xTaskNotifyGive(convTaskHandle);
             }
-            SR::sr_set_mode(SR_MODE_COMMAND);
             break;
 
         case SR_EVENT_COMMAND:
             Serial.printf("✅ Command detected! ID=%d, Phrase=%d\n", command_id, phrase_id);
+#ifdef ENABLE_SPEAKER_FEEDBACK
+            GlobalSpeaker.beep();
+#endif
 
             // Map phrase_id to actual voice command (since phrase_id indexes the voice_commands array)
             if (phrase_id >= 0 && phrase_id < (sizeof(voice_commands) / sizeof(sr_cmd_t))) {

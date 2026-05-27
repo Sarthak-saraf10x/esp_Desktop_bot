@@ -19,4 +19,14 @@ void runTasks(){
 		&mainTaskHandle,
 		0
 	);
+
+	xTaskCreateUniversal(
+		conversationTask,
+		"convTask",
+		1024 * 8, // Need more stack for HTTPClient and PSRAM allocation
+		NULL,
+		3,
+		&convTaskHandle,
+		0
+	);
 }

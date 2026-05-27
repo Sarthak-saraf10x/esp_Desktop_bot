@@ -16,6 +16,8 @@ void setupApp(){
 	setupDisplay(SDA_PIN, SCL_PIN);
 	setupFaceDisplay(40);
 	setupSpeechRecognition();
+	setupSpeaker();
+	setupWiFi();
 }
 
 void setupNotification() {
@@ -114,4 +116,10 @@ void setupSpeechRecognition() {
 		Serial.printf("❌ Failed to start Speech Recognition: %s\n", esp_err_to_name(ret));
 		sr_system_running = false;
 	}
+}
+
+void setupSpeaker() {
+#ifdef ENABLE_SPEAKER_FEEDBACK
+	GlobalSpeaker.begin();
+#endif
 }

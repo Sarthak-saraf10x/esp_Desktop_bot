@@ -189,10 +189,12 @@ static void audio_feed_task(void *arg) {
 
     /* Channel Adjust */
     if (SR::g_sr_data->i2s_rx_chan_num == 1) {
-      for (int i = audio_chunksize - 1; i >= 0; i--) {
-        audio_buffer[i * SR_CHANNEL_NUM + 2] = 0;
-        audio_buffer[i * SR_CHANNEL_NUM + 1] = 0;
-        audio_buffer[i * SR_CHANNEL_NUM + 0] = audio_buffer[i];
+      if (SR_CHANNEL_NUM == 3) {
+          for (int i = audio_chunksize - 1; i >= 0; i--) {
+            audio_buffer[i * SR_CHANNEL_NUM + 2] = 0;
+            audio_buffer[i * SR_CHANNEL_NUM + 1] = 0;
+            audio_buffer[i * SR_CHANNEL_NUM + 0] = audio_buffer[i];
+          }
       }
     } else if (SR::g_sr_data->i2s_rx_chan_num == 2) {
       for (int i = audio_chunksize - 1; i >= 0; i--) {
@@ -376,10 +378,23 @@ esp_err_t sr_setup(
   // Init Model
   ESP_LOGD(SR::TAG, "init model");
   SR::models = esp_srmodel_init("model");
+  
+  if (SR::models == nullptr) {
+      ESP_LOGE(SR::TAG, "Failed to load WakeWord/MN models! Did you flash srmodels.bin to the model partition?");
+      return ESP_FAIL;
+  }
 
   // Load WakeWord Detection
   // https://docs.espressif.com/projects/esp-sr/en/latest/esp32/audio_front_end/migration_guide.html
-  afe_config_t *afe_config = afe_config_init("MMR", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+  afe_config_t *afe_config;
+  if (rx_chan == SR_CHANNELS_MONO) {
+      SR_CHANNEL_NUM = 1;
+      afe_config = afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+  } else {
+      SR_CHANNEL_NUM = 3;
+      afe_config = afe_config_init("MMR", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+  }
+  
   afe_config->wakenet_model_name = esp_srmodel_filter(SR::models, ESP_WN_PREFIX, "hiesp");
   afe_config->aec_init = false;
   afe_config = afe_config_check(afe_config);
@@ -387,6 +402,16 @@ esp_err_t sr_setup(
   SR::g_sr_data->afe_handle = esp_afe_handle_from_config(afe_config);
   ESP_LOGD(SR::TAG, "load wakenet '%s'", afe_config->wakenet_model_name);
   SR::g_sr_data->afe_data = SR::g_sr_data->afe_handle->create_from_config(afe_config);
+
+  // Lower WakeNet threshold for faster/easier wake word detection.
+  // Default is usually ~0.9 (very strict). 0.5 gives a good balance:
+  // lower = more sensitive (easier to trigger, may false-fire),
+  // higher = stricter (need very clear pronunciation).
+  // Adjust between 0.3 (very loose) – 0.9 (very strict) to taste.
+  if (SR::g_sr_data->afe_handle->set_wakenet_threshold) {
+    SR::g_sr_data->afe_handle->set_wakenet_threshold(SR::g_sr_data->afe_data, 1, 0.5f);
+    ESP_LOGI(SR::TAG, "WakeNet threshold set to 0.5 (more sensitive)");
+  }
 
   // Load Custom Command Detection
   char *mn_name = esp_srmodel_filter(SR::models, ESP_MN_PREFIX, ESP_MN_ENGLISH);

@@ -10,6 +10,8 @@
 #include "Display.h"
 #include "Face.h"
 #include "esp32-hal-sr.h"
+#include "Speaker.h"
+#include "wifi_manager.h"
 
 extern Notification* notification;
 extern Face* faceDisplay;
@@ -21,3 +23,4 @@ void setupNotification();
 void setupMicrophone();
 void setupFaceDisplay(uint16_t size = 40);
 void setupSpeechRecognition();
+void setupSpeaker();
