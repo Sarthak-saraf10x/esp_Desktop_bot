@@ -1,26 +1,30 @@
-# ESP32 Wake Word Detection
+# ESP32-S3 AI Desktop Bot
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32--S3-green.svg)
 ![Framework](https://img.shields.io/badge/framework-Arduino-blue.svg)
 
-An ESP32-S3 based wake word detection system using Espressif's ESP-SR framework. Features voice control with animated face display feedback and supports both I2S digital and analog microphones.
+<p align="center">
+  <img src="images/esp.jpg" alt="ESP32-S3 AI Desktop Bot" width="600">
+</p>
+
+An advanced ESP32-S3 based conversational desktop bot featuring Voice Activity Detection (VAD), continuous conversation session management, and integrated generative AI via a Python server (powered by Google Gemini). The bot features an expressive OLED animated face and supports natural, continuous voice interactions.
 
 ## Features
 
-- **Wake Word Detection**: Activate with "Hi ESP" command
-- **Voice Commands**: Control lights and fans with natural language
-- **Animated Display**: OLED display with expressive face animations
-- **Dual Microphone Support**: I2S digital or analog microphone options
-- **FreeRTOS Multi-Core**: Optimized task distribution across both cores
+- **Wake Word Detection**: Activated by a customizable wake word using Espressif's ESP-SR.
+- **Natural Conversations**: Uses generative AI (Gemini) through a Python backend for open-ended, contextual back-and-forth conversations.
+- **Voice Activity Detection (VAD)**: Smartly detects when you speak and automatically stops recording after a period of silence to seamlessly continue the conversation.
+- **Session Management**: Maintains conversational context over multiple interactions, with server-side signals to safely terminate the session.
+- **Animated Display**: Expressive OLED face animations synchronized with bot states (Idle, Listening, Speaking).
+- **Hardware Optimized**: FreeRTOS multi-core task distribution for efficient audio processing, network streaming, and UI rendering.
 
 ## Hardware Requirements
 
 - ESP32-S3-DevKitC-1-N16R8 (16MB Flash, 8MB PSRAM)
 - OLED Display (I2C, 128x64)
-- Microphone Options:
-  - I2S Digital: INMP441, ICS-43434, or SPH0645
-  - Analog: MAX9814 or similar with gain control
+- Microphone Options: I2S Digital (e.g., INMP441, ICS-43434) or Analog with gain control
+- Speaker Options: I2S Amplifier (e.g., MAX98357A) connected to a speaker
 
 ## Dependencies
 
@@ -32,7 +36,7 @@ An ESP32-S3 based wake word detection system using Espressif's ESP-SR framework.
 
 ## Installation
 
-1. Install PlatformIO (VSCode Extension or CLI)
+1. Install PlatformIO (VSCode Extension or CLI).
 
 2. Clone the repository:
    ```bash
@@ -40,105 +44,52 @@ An ESP32-S3 based wake word detection system using Espressif's ESP-SR framework.
    cd ESP32-WakeWord
    ```
 
-3. Configure hardware settings in `include/app_config.h`:
+3. Configure hardware settings in `include/app_config.h` (Microphone and Display pins).
+
+4. Update Backend Configuration in `src/app/tasks/ConversationTask.cpp`:
    ```cpp
-   // Select microphone type
-   #define MIC_TYPE MIC_TYPE_I2S  // or MIC_TYPE_ANALOG
-   
-   // Configure pins according to your wiring
-   #define MIC_SCK GPIO_NUM_41    // I2S: SCK
-   #define MIC_WS  GPIO_NUM_42    // I2S: WS
-   #define MIC_DIN GPIO_NUM_2     // I2S: SD
-   // Or for analog microphone
-   #define MIC_OUT GPIO_NUM_4     // Analog: Output
-   #define MIC_GAIN GPIO_NUM_38   // Analog: Gain
+   #define SERVER_HOST "192.168.1.9" // Set this to your Python backend IP address
+   #define SERVER_PORT 5000
    ```
 
-4. Build and upload:
+5. Build and upload:
    ```bash
    pio run -t upload
    ```
 
-## Voice Commands
-
-1. Wake Word:
-   - Say "Hi ESP" to activate command mode
-
-2. Light Control:
-   ```
-   "Turn on the light" / "Switch on the light"
-   "Turn off the light" / "Switch off the light" / "Go dark"
-   ```
-
-3. Fan Control:
-   ```
-   "Start fan"
-   "Stop fan"
-   ```
-
-## Project Structure
-
-```
-src/
-├── main.cpp              # Entry point
-├── boot/                 # System initialization
-│   ├── setup.cpp        # Hardware setup sequence
-│   └── constants.h      # Voice commands & constants
-├── app/                 # Application logic
-│   ├── tasks/          # FreeRTOS tasks
-│   ├── callback/       # ESP-SR callbacks
-│   └── display/        # Display functions
-lib/                    # Custom libraries
-├── Display/            # Display abstraction
-├── FaceDisplay/        # Animated face system
-├── Microphone/        # Microphone interfaces
-└── Notification/      # Inter-task communication
-```
+6. **Python Backend**: Make sure to run the corresponding Flask backend server with Gemini integration so the bot has an endpoint to stream audio to.
 
 ## ⚡ Architecture
 
 ### Task Distribution
-- **Core 0**: Speech recognition processing
+- **Core 0**: Speech recognition and Audio Streaming
   - Priority 8
-  - 4KB stack
-  - Handles ESP-SR system and audio processing
-
+  - Handles ESP-SR wake word, VAD silence detection, audio recording via I2S, and HTTP multipart audio streaming to the server.
 - **Core 1**: Display and animations
   - Priority 19
-  - 4KB stack
-  - Manages UI updates and face animations
+  - Manages UI updates and dynamic face expressions using custom MochiDisplay and FaceDisplay logic.
 
 ### Memory Configuration
 - Custom partition table (`hiesp.csv`)
-- 8.9MB dedicated to model storage
-- PSRAM optimization for ESP32-S3
+- PSRAM heavily utilized for audio buffering (`AUDIO_BUF_SIZE`) and parsing HTTP chunked audio responses during playback.
 
 ## Model Management
 
 For detailed instructions on building, packaging, and flashing ESP-SR models, see the [ESP-SR Model Management Guide](model/README.md). The guide includes:
-
 - Model structure and organization
 - Build and flash instructions
-- Pre-built configurations
 - Troubleshooting common model issues
-- ESP-SR and I2S integration tips
 
 ## Troubleshooting
 
-1. **Speech Recognition Issues**
-   - Verify 16kHz sample rate configuration
-   - Check microphone signal levels
-   - Monitor heap usage with serial output
-
+1. **Audio/Network Issues**
+   - Ensure the ESP32 is connected to the same local network as the Python backend.
+   - Verify 16kHz sample rate configuration and I2S pin routing.
 2. **Build Errors**
    - Clean build: `pio run -t clean`
-   - Verify ESP-SR platform compatibility
-   - Check PSRAM configuration
-
+   - Check PSRAM configuration.
 3. **Display Problems**
-   - Verify I2C pins in `app_config.h`
-   - Check OLED address/configuration
-   - Monitor display task stack usage
+   - Verify I2C pins in `app_config.h`.
 
 ## License
 
@@ -149,3 +100,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [ESP-SR Framework](https://github.com/espressif/esp-sr) by Espressif
 - [U8g2 Library](https://github.com/olikraus/u8g2)
 - Original face animations based on [ESP32-Eyes](https://github.com/playfultechnology/esp32-eyes)
+- AI integration powered by Google Gemini via Python Flask Backend
