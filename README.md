@@ -94,7 +94,7 @@ For detailed instructions on building, packaging, and flashing ESP-SR models, se
 
 
 ## Acknowledgments
-
+-https://github.com/jahrulnr/ESP32-WakeWord
 - [ESP-SR Framework](https://github.com/espressif/esp-sr) by Espressif
 - [U8g2 Library](https://github.com/olikraus/u8g2)
 - Original face animations based on [ESP32-Eyes](https://github.com/playfultechnology/esp32-eyes)
