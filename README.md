@@ -91,9 +91,7 @@ For detailed instructions on building, packaging, and flashing ESP-SR models, se
 3. **Display Problems**
    - Verify I2C pins in `app_config.h`.
 
-## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
