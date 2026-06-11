@@ -1,6 +1,8 @@
 #include "app/tasks.h"
 #include <esp_log.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include "app/audio/microphone.h"
 #include "Speaker.h"
 #include <csr.h>
@@ -10,8 +12,8 @@ TaskHandle_t convTaskHandle = nullptr;
 
 bool is_conversation_active = false;
 
-#define SERVER_HOST "192.168.1.9"
-#define SERVER_PORT 5000
+#define SERVER_HOST "sarthak10x-espdesktopbot.hf.space"
+#define SERVER_PORT 443
 #define SERVER_PATH "/audio_stream"
 
 // Up to 15 seconds of 16kHz 16-bit audio (mono)
@@ -152,14 +154,19 @@ void conversationTask(void *param) {
         GlobalSpeaker.beep();
         g_displayState = 0;  // Back to idle while connecting
 
-        // 4. Send via raw WiFiClient (same approach as the working button sketch)
+        // 4. Send via HTTPClient (bulletproof HTTP/1.1 implementation)
         if (WiFi.status() == WL_CONNECTED) {
-            WiFiClient client;
-            if (!client.connect(SERVER_HOST, SERVER_PORT)) {
-                ESP_LOGE(TAG, "Failed to connect to server");
+            HTTPClient http;
+            WiFiClientSecure client;
+            client.setInsecure(); // Ignore SSL certificates
+
+            String url = "https://" + String(SERVER_HOST) + String(SERVER_PATH);
+            if (!http.begin(client, url)) {
+                ESP_LOGE(TAG, "Failed to begin HTTPClient");
                 is_conversation_active = false;
             } else {
-                // Build WAV file in PSRAM: 44-byte header + PCM data
+                http.setTimeout(30000);
+
                 uint32_t wavDataSize = totalBytesRead;
                 uint32_t wavTotalSize = 44 + wavDataSize;
 
@@ -172,160 +179,93 @@ void conversationTask(void *param) {
 
                 size_t contentLength = headerPart.length() + wavTotalSize + footerPart.length();
 
-                // Send HTTP request headers
-                client.println("POST " SERVER_PATH " HTTP/1.1");
-                client.println("Host: " SERVER_HOST ":" + String(SERVER_PORT));
-                client.println("Content-Type: multipart/form-data; boundary=" + boundary);
-                client.println("Content-Length: " + String(contentLength));
-                client.println("Connection: close");
-                client.println();
-
-                // Send multipart header
-                client.print(headerPart);
-
-                // Send WAV header (44 bytes)
-                uint8_t wavHeader[44];
-                buildWavHeader(wavHeader, wavDataSize);
-                client.write(wavHeader, 44);
-
-                // Stream PCM data in chunks
-                const size_t CHUNK = 512;
-                for (size_t sent = 0; sent < totalBytesRead; sent += CHUNK) {
-                    size_t toSend = totalBytesRead - sent;
-                    if (toSend > CHUNK) toSend = CHUNK;
-                    client.write(audioBuffer + sent, toSend);
-                }
-
-                // Send multipart footer
-                client.print(footerPart);
-
-                ESP_LOGI(TAG, "Sent %d bytes to server, waiting for response...", contentLength);
-
-                // 5. Wait for response headers
-                unsigned long timeout = millis();
-                while (!client.available() && millis() - timeout < 10000) delay(10);
-
-                if (!client.available()) {
-                    ESP_LOGE(TAG, "No response from server");
+                // Allocate one full buffer in PSRAM for the payload
+                uint8_t* payloadBuf = (uint8_t*)heap_caps_malloc(contentLength, MALLOC_CAP_SPIRAM);
+                if (!payloadBuf) {
+                    ESP_LOGE(TAG, "Failed to allocate payload buffer in PSRAM");
                     is_conversation_active = false;
                 } else {
-                    // Read HTTP headers; detect transfer encoding
-                    bool headersEnded = false;
-                    bool isChunked = false;
-                    int contentLength = -1;
-                    bool isFirstLine = true;
-                    int httpStatus = 200;
+                    // 1. Copy Header
+                    size_t offset = 0;
+                    memcpy(payloadBuf + offset, headerPart.c_str(), headerPart.length());
+                    offset += headerPart.length();
 
-                    while (client.connected() && !headersEnded) {
-                        if (client.available()) {
-                            String line = client.readStringUntil('\n');
-                            line.trim();
-                            if (isFirstLine) {
-                                isFirstLine = false;
-                                // Parse HTTP/1.1 200 OK -> 200
-                                int spaceIdx = line.indexOf(' ');
-                                if (spaceIdx != -1) {
-                                    httpStatus = line.substring(spaceIdx + 1, spaceIdx + 4).toInt();
-                                    ESP_LOGI(TAG, "HTTP Status: %d", httpStatus);
-                                }
-                                continue;
-                            }
-                            
-                            if (line == "") {
-                                headersEnded = true;
-                            } else {
-                                String lower = line;
-                                lower.toLowerCase();
-                                if (lower.indexOf("transfer-encoding: chunked") >= 0) {
-                                    isChunked = true;
-                                } else if (lower.startsWith("content-length:")) {
-                                    contentLength = lower.substring(15).toInt();
-                                } else if (lower.startsWith("x-end-conversation:")) {
-                                    if (lower.indexOf("true") >= 0) {
-                                        is_conversation_active = false;
-                                        ESP_LOGI(TAG, "Server requested conversation close.");
-                                    }
-                                }
-                                ESP_LOGD(TAG, "Header: %s", line.c_str());
+                    // 2. Copy WAV Header
+                    buildWavHeader(payloadBuf + offset, wavDataSize);
+                    offset += 44;
+
+                    // 3. Copy Audio Data
+                    memcpy(payloadBuf + offset, audioBuffer, wavDataSize);
+                    offset += wavDataSize;
+
+                    // 4. Copy Footer
+                    memcpy(payloadBuf + offset, footerPart.c_str(), footerPart.length());
+                    offset += footerPart.length();
+
+                    // Set headers
+                    http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+                    http.addHeader("User-Agent", "python-requests/2.33.1"); // Mimic requests
+                    http.addHeader("Accept", "*/*");
+                    http.addHeader("X-Bot-Secret-Key", "dfgF.sd:Oklfgdhdsa034kJDJdsfbjsdnd/dsad");
+
+                    ESP_LOGI(TAG, "Sending HTTP POST with %d bytes...", contentLength);
+                    
+                    int httpResponseCode = http.POST(payloadBuf, contentLength);
+                    
+                    heap_caps_free(payloadBuf); // Free immediately after sending
+
+                    if (httpResponseCode > 0) {
+                        ESP_LOGI(TAG, "HTTP Response code: %d", httpResponseCode);
+                        
+                        if (httpResponseCode != 200) {
+                            ESP_LOGE(TAG, "Server returned error %d", httpResponseCode);
+                            is_conversation_active = false;
+                        }
+
+                        // Check headers
+                        bool isChunked = false;
+                        int responseContentLength = -1;
+                        
+                        // Parse relevant headers if available
+                        for (int i = 0; i < http.headers(); i++) {
+                            String headerName = http.headerName(i);
+                            String headerVal = http.header(i);
+                            headerName.toLowerCase();
+                            if (headerName == "transfer-encoding" && headerVal.indexOf("chunked") >= 0) isChunked = true;
+                            if (headerName == "content-length") responseContentLength = headerVal.toInt();
+                            if (headerName == "x-end-conversation" && headerVal.indexOf("true") >= 0) {
+                                is_conversation_active = false;
                             }
                         }
-                    }
-                    
-                    if (httpStatus != 200) {
-                        ESP_LOGE(TAG, "Server returned error %d, ending conversation", httpStatus);
-                        is_conversation_active = false;
-                    }
-                    
-                    ESP_LOGI(TAG, "Response: chunked=%d, content-length=%d", isChunked, contentLength);
 
-                    // 6. Buffer entire response into PSRAM, then play
-                    // Server uses chunked transfer-encoding; decode it properly so
-                    // chunk-size hex lines don't end up in the audio buffer (noise).
-                    ESP_LOGI(TAG, "Buffering response audio...");
-                    // Signal mainTask: speaking state
-                    g_displayState = 2;  // Speaking
-                    if (faceDisplay) faceDisplay->Expression.GoTo_Happy();
+                        ESP_LOGI(TAG, "Response: chunked=%d, content-length=%d", isChunked, responseContentLength);
 
-                    // Allocate 512KB for response (plenty for short TTS clips)
-                    const size_t RSP_BUF_MAX = 512 * 1024;
-                    uint8_t* rspBuf = (uint8_t*)heap_caps_malloc(RSP_BUF_MAX, MALLOC_CAP_SPIRAM);
-                    size_t rspLen = 0;
+                        // Signal mainTask: speaking state
+                        g_displayState = 2;  // Speaking
+                        if (faceDisplay) faceDisplay->Expression.GoTo_Happy();
 
-                    if (rspBuf) {
-                        unsigned long dataTimeout = millis();
+                        // Allocate 512KB for response (plenty for short TTS clips)
+                        const size_t RSP_BUF_MAX = 512 * 1024;
+                        uint8_t* rspBuf = (uint8_t*)heap_caps_malloc(RSP_BUF_MAX, MALLOC_CAP_SPIRAM);
+                        size_t rspLen = 0;
 
-                        if (isChunked) {
-                            // --- Chunked Transfer-Encoding decode ---
-                            bool chunkedDone = false;
-                            while (client.connected() && !chunkedDone
-                                   && rspLen < RSP_BUF_MAX
-                                   && millis() - dataTimeout < 10000) {
-
-                                if (!client.available()) { delay(1); continue; }
-
-                                // Read chunk-size line (hex + \r\n)
-                                String chunkSizeLine = client.readStringUntil('\n');
-                                chunkSizeLine.trim();
-                                if (chunkSizeLine.length() == 0) continue;
-
-                                int chunkSize = (int)strtol(chunkSizeLine.c_str(), NULL, 16);
-                                if (chunkSize == 0) { chunkedDone = true; break; }
-
-                                // Read exactly chunkSize payload bytes
-                                int remaining = chunkSize;
-                                while (remaining > 0 && client.connected()
-                                       && millis() - dataTimeout < 10000) {
-                                    if (client.available()) {
-                                        size_t toRead = min((size_t)remaining, RSP_BUF_MAX - rspLen);
-                                        int got = client.read(rspBuf + rspLen, toRead);
-                                        if (got > 0) {
-                                            rspLen += got;
-                                            remaining -= got;
-                                            dataTimeout = millis();
-                                        }
-                                    } else {
-                                        delay(1);
+                        if (rspBuf) {
+                            WiFiClient* stream = http.getStreamPtr();
+                            unsigned long dataTimeout = millis();
+                            
+                            // Since HTTPClient already handles chunk decoding transparently, 
+                            // stream->read() gives us the raw payload!
+                            while (http.connected() && rspLen < RSP_BUF_MAX && millis() - dataTimeout < 30000) {
+                                if (stream->available()) {
+                                    int got = stream->read(rspBuf + rspLen, RSP_BUF_MAX - rspLen);
+                                    if (got > 0) {
+                                        rspLen += got;
+                                        dataTimeout = millis();
                                     }
-                                }
-
-                                // Consume trailing \r\n after chunk payload
-                                client.readStringUntil('\n');
-                                dataTimeout = millis();
-                            }
-                        } else {
-                            // --- Plain (non-chunked) read ---
-                            size_t target = (contentLength > 0 && (size_t)contentLength < RSP_BUF_MAX)
-                                            ? (size_t)contentLength : RSP_BUF_MAX;
-                            while (client.connected() && rspLen < target
-                                   && millis() - dataTimeout < 10000) {
-                                if (client.available()) {
-                                    int got = client.read(rspBuf + rspLen, target - rspLen);
-                                    if (got > 0) { rspLen += got; dataTimeout = millis(); }
                                 } else {
                                     delay(1);
                                 }
                             }
-                        }
 
 
                         ESP_LOGI(TAG, "Received %d bytes of audio response", rspLen);
@@ -376,14 +316,13 @@ void conversationTask(void *param) {
                         }
 
                         heap_caps_free(rspBuf);
-                        ESP_LOGI(TAG, "Playback done");
-                        vTaskDelay(pdMS_TO_TICKS(200)); // Delay to prevent feedback loop
-                    } else {
-                        ESP_LOGE(TAG, "Failed to allocate response buffer");
-                        is_conversation_active = false;
+                        } else {
+                            ESP_LOGE(TAG, "Failed to connect to server: %s", http.errorToString(httpResponseCode).c_str());
+                            is_conversation_active = false;
+                        }
                     }
                 }
-                client.stop();
+                http.end();
             }
         } else {
             ESP_LOGE(TAG, "WiFi not connected");
