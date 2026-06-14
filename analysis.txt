@@ -1,0 +1,18 @@
+# ESP32-S3 AI Desktop Bot Analysis
+
+## 1. Hardware Components
+Here is a quick list of the hardware components used for this project:
+*   **Microcontroller:** ESP32-S3-DevKitC-1-N16R8 (features 16MB Flash and 8MB PSRAM for audio buffering).
+*   **Display:** 128x64 OLED Display (connected via I2C) used for rendering expressive face animations.
+*   **Microphone:** I2S Digital Microphones (e.g., INMP441, ICS-43434) or an Analog microphone with gain control for audio input.
+*   **Speaker/Amplifier:** I2S Audio Amplifier (e.g., MAX98357A) connected to a speaker for audio output.
+
+## 2. The Core Workflow (Data Flow)
+The system operates on a continuous, multi-step pipeline distributed between the ESP32-S3 hardware and a Python server:
+
+1.  **Wake Word Detection:** The ESP32-S3 locally listens for a specific wake word using Espressif's ESP-SR framework.
+2.  **Audio Capture (Listening):** Once triggered, the ESP32 begins capturing the user's voice via the I2S microphone. It utilizes Voice Activity Detection (VAD) to automatically stop recording when the user finishes speaking (detecting a period of silence).
+3.  **Transmission to Backend:** The captured audio is streamed via Wi-Fi to a Python Flask backend using HTTP multipart audio streaming. 
+4.  **Backend Processing (AI Generation):** The Flask server processes the audio (managing conversation history and session state) and sends the user's prompt to Google Gemini's generative AI to generate a contextual response. 
+5.  **Audio Response & Playback:** The backend streams the generated audio response back to the ESP32 as HTTP chunked audio. The ESP32 buffers this data in its PSRAM and plays it back through the I2S amplifier and speaker.
+6.  **Visual Feedback:** Throughout this entire process, a dedicated core on the ESP32 updates the OLED display with synchronized face animations reflecting the current state (e.g., Idle, Listening, Speaking).

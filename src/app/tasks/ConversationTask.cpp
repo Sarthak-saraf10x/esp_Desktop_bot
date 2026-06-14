@@ -5,15 +5,16 @@
 #include <HTTPClient.h>
 #include "app/audio/microphone.h"
 #include "Speaker.h"
+#include "greetings_audio.h"
 #include <csr.h>
 
 static const char* TAG = "ConvTask";
 TaskHandle_t convTaskHandle = nullptr;
 
 bool is_conversation_active = false;
-
-#define SERVER_HOST "sarthak10x-espdesktopbot.hf.space"
-#define SERVER_PORT 443
+//http://10.211.100.156:5000
+#define SERVER_HOST "10.211.100.156"
+#define SERVER_PORT 5000
 #define SERVER_PATH "/audio_stream"
 
 // Up to 15 seconds of 16kHz 16-bit audio (mono)
@@ -42,6 +43,45 @@ static void buildWavHeader(uint8_t* buf, uint32_t audioDataBytes) {
     memcpy(buf + 40, &audioDataBytes, 4);
 }
 
+struct AudioDownloadState {
+    uint8_t* buf;
+    size_t maxLen;
+    volatile size_t downloadedLen;
+    volatile size_t expectedLen;
+    volatile bool downloadComplete;
+    volatile bool downloadFailed;
+    WiFiClient* stream;
+    HTTPClient* http;
+};
+
+static void audioDownloadTask(void* pvParameters) {
+    AudioDownloadState* state = (AudioDownloadState*)pvParameters;
+    unsigned long dataTimeout = millis();
+    
+    while (state->downloadedLen < state->expectedLen && state->http->connected()) {
+        if (state->stream->available()) {
+            size_t toRead = state->expectedLen - state->downloadedLen;
+            if (toRead > 4096) toRead = 4096;
+            
+            int got = state->stream->read(state->buf + state->downloadedLen, toRead);
+            if (got > 0) {
+                state->downloadedLen += got;
+                dataTimeout = millis();
+            }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        
+        if (millis() - dataTimeout > 5000) {
+            ESP_LOGW("AudioDownload", "Download timeout");
+            state->downloadFailed = true;
+            break;
+        }
+    }
+    state->downloadComplete = true;
+    vTaskDelete(NULL);
+}
+
 void conversationTask(void *param) {
     while (1) {
         if (!is_conversation_active) {
@@ -51,10 +91,22 @@ void conversationTask(void *param) {
             
             is_conversation_active = true;
             ESP_LOGI(TAG, "Conversation started!");
-            GlobalSpeaker.beep();
+            
+            // Set display to happy/speaking while playing the greeting
+            g_displayState = 2; // Speaking
+            if (faceDisplay) {
+                faceDisplay->LookFront();
+                faceDisplay->Expression.GoTo_Happy();
+            }
+            
+            // Play a random greeting spoken word
+            int greetingIdx = esp_random() % GREETINGS_COUNT;
+            const GreetingAudio& greeting = GREETINGS_LIST[greetingIdx];
+            ESP_LOGI(TAG, "Playing greeting: %s", greeting.name);
+            GlobalSpeaker.playPCM(greeting.data, greeting.length);
         } else {
             ESP_LOGI(TAG, "Conversation continuing...");
-            GlobalSpeaker.beep(); // Indicate bot is listening for the next turn
+            GlobalSpeaker.beep(); // Indicate bot is listening for the wenext turn
         }
 
         // 1. Pause SR
@@ -157,10 +209,9 @@ void conversationTask(void *param) {
         // 4. Send via HTTPClient (bulletproof HTTP/1.1 implementation)
         if (WiFi.status() == WL_CONNECTED) {
             HTTPClient http;
-            WiFiClientSecure client;
-            client.setInsecure(); // Ignore SSL certificates
+            WiFiClient client;
 
-            String url = "https://" + String(SERVER_HOST) + String(SERVER_PATH);
+            String url = "http://" + String(SERVER_HOST) + ":" + String(SERVER_PORT) + String(SERVER_PATH);
             if (!http.begin(client, url)) {
                 ESP_LOGE(TAG, "Failed to begin HTTPClient");
                 is_conversation_active = false;
@@ -202,11 +253,15 @@ void conversationTask(void *param) {
                     memcpy(payloadBuf + offset, footerPart.c_str(), footerPart.length());
                     offset += footerPart.length();
 
-                    // Set headers
+                    // Set request headers
                     http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-                    http.addHeader("User-Agent", "python-requests/2.33.1"); // Mimic requests
+                    http.addHeader("User-Agent", "ESP32HTTPClient");
                     http.addHeader("Accept", "*/*");
                     http.addHeader("X-Bot-Secret-Key", "dfgF.sd:Oklfgdhdsa034kJDJdsfbjsdnd/dsad");
+
+                    // Tell HTTPClient which response headers to capture
+                    const char* headerKeys[] = {"Content-Length", "Transfer-Encoding", "X-End-Conversation"};
+                    http.collectHeaders(headerKeys, 3);
 
                     ESP_LOGI(TAG, "Sending HTTP POST with %d bytes...", contentLength);
                     
@@ -222,108 +277,182 @@ void conversationTask(void *param) {
                             is_conversation_active = false;
                         }
 
-                        // Check headers
-                        bool isChunked = false;
-                        int responseContentLength = -1;
-                        
-                        // Parse relevant headers if available
-                        for (int i = 0; i < http.headers(); i++) {
-                            String headerName = http.headerName(i);
-                            String headerVal = http.header(i);
-                            headerName.toLowerCase();
-                            if (headerName == "transfer-encoding" && headerVal.indexOf("chunked") >= 0) isChunked = true;
-                            if (headerName == "content-length") responseContentLength = headerVal.toInt();
-                            if (headerName == "x-end-conversation" && headerVal.indexOf("true") >= 0) {
-                                is_conversation_active = false;
-                            }
+                        // Read collected response headers
+                        int responseContentLength = http.header("Content-Length").toInt();
+                        bool isChunked = http.header("Transfer-Encoding").indexOf("chunked") >= 0;
+                        String endConvoHeader = http.header("X-End-Conversation");
+                        if (endConvoHeader.indexOf("true") >= 0) {
+                            is_conversation_active = false;
                         }
 
-                        ESP_LOGI(TAG, "Response: chunked=%d, content-length=%d", isChunked, responseContentLength);
+                        ESP_LOGI(TAG, "Response: content-length=%d, chunked=%d", responseContentLength, isChunked);
 
                         // Signal mainTask: speaking state
                         g_displayState = 2;  // Speaking
                         if (faceDisplay) faceDisplay->Expression.GoTo_Happy();
 
-                        // Allocate 512KB for response (plenty for short TTS clips)
-                        const size_t RSP_BUF_MAX = 512 * 1024;
+                        // ========================================================
+                        // DOWNLOAD-THEN-PLAY: Buffer all audio into PSRAM first,
+                        // then play smoothly. The ~82KB download takes only 1-2s.
+                        // (The long wait before this point is server processing.)
+                        // ========================================================
+                        const size_t RSP_BUF_MAX = 1024 * 1024 * 3 / 2; // 1.5 MB (covers up to 48s response)
                         uint8_t* rspBuf = (uint8_t*)heap_caps_malloc(RSP_BUF_MAX, MALLOC_CAP_SPIRAM);
-                        size_t rspLen = 0;
 
                         if (rspBuf) {
                             WiFiClient* stream = http.getStreamPtr();
-                            unsigned long dataTimeout = millis();
+                            unsigned long dlStart = millis();
+
+                            size_t expectedLen = (responseContentLength > 0) ? (size_t)responseContentLength : RSP_BUF_MAX;
+                            if (expectedLen > RSP_BUF_MAX) expectedLen = RSP_BUF_MAX;
                             
-                            // Since HTTPClient already handles chunk decoding transparently, 
-                            // stream->read() gives us the raw payload!
-                            while (http.connected() && rspLen < RSP_BUF_MAX && millis() - dataTimeout < 30000) {
-                                if (stream->available()) {
-                                    int got = stream->read(rspBuf + rspLen, RSP_BUF_MAX - rspLen);
-                                    if (got > 0) {
-                                        rspLen += got;
-                                        dataTimeout = millis();
+                            // Initialize download state
+                            AudioDownloadState dlState;
+                            dlState.buf = rspBuf;
+                            dlState.maxLen = RSP_BUF_MAX;
+                            dlState.downloadedLen = 0;
+                            dlState.expectedLen = expectedLen;
+                            dlState.downloadComplete = false;
+                            dlState.downloadFailed = false;
+                            dlState.stream = stream;
+                            dlState.http = &http;
+
+                            // Spawn background download task on Core 0 (WiFi core)
+                            xTaskCreatePinnedToCore(
+                                audioDownloadTask,
+                                "audio_download",
+                                4096,
+                                &dlState,
+                                5, // Priority 5
+                                NULL,
+                                0 // Core 0
+                            );
+
+                            size_t playOffset = 0;
+                            bool parsedHeader = false;
+                            uint32_t wavSampleRate = 16000;
+                            size_t pcmOffset = 44;
+                            const float VOLUME_BOOST = 3.5f;
+                            const size_t CHUNK_SAMPLES = 512;
+                            int16_t outBuf[CHUNK_SAMPLES];
+
+                            const size_t PRE_BUFFER_SIZE = 64 * 1024; // 2 seconds of audio pre-buffering
+                            bool startPlaying = false;
+
+                            // Loop runs while downloading is active OR we have unplayed data in buffer
+                            while (!dlState.downloadComplete || playOffset < dlState.downloadedLen) {
+                                // 1. Parse WAV header as soon as we have enough bytes (or download completes)
+                                if (!parsedHeader && (dlState.downloadedLen >= 44 || dlState.downloadComplete)) {
+                                    bool foundData = false;
+                                    if (dlState.downloadedLen >= 12 && memcmp(rspBuf, "RIFF", 4) == 0 && memcmp(rspBuf + 8, "WAVE", 4) == 0) {
+                                        if (dlState.downloadedLen >= 28) {
+                                            memcpy(&wavSampleRate, rspBuf + 24, 4);
+                                            ESP_LOGI(TAG, "WAV sample rate: %lu Hz", (unsigned long)wavSampleRate);
+                                            if (wavSampleRate != 16000) {
+                                                ESP_LOGW(TAG, "Adjusting speaker to %lu Hz", (unsigned long)wavSampleRate);
+                                                GlobalSpeaker.setSampleRate(wavSampleRate);
+                                            }
+                                        }
+                                        
+                                        // Walk chunks to find data offset
+                                        size_t pos = 12;
+                                        while (pos + 8 <= dlState.downloadedLen) {
+                                            uint32_t subChunkSize;
+                                            memcpy(&subChunkSize, rspBuf + pos + 4, 4);
+                                            if (memcmp(rspBuf + pos, "data", 4) == 0) {
+                                                pcmOffset = pos + 8;
+                                                ESP_LOGI(TAG, "WAV 'data' chunk at offset %d", (int)pcmOffset);
+                                                foundData = true;
+                                                break;
+                                            }
+                                            pos += 8 + subChunkSize;
+                                        }
+                                    }
+                                    
+                                    // If we found the 'data' chunk or the download is fully complete, finish parsing
+                                    if (foundData || dlState.downloadComplete) {
+                                        if (!foundData) {
+                                            ESP_LOGW(TAG, "WAV 'data' chunk not found, defaulting to offset 44");
+                                            pcmOffset = 44;
+                                        }
+                                        playOffset = pcmOffset;
+                                        parsedHeader = true;
+                                    }
+                                }
+
+                                // 2. Check if pre-buffering is finished
+                                if (!startPlaying && parsedHeader) {
+                                    if (dlState.downloadedLen >= pcmOffset + PRE_BUFFER_SIZE || dlState.downloadComplete) {
+                                        ESP_LOGI(TAG, "Pre-buffering complete (%d bytes). Starting playback.", (int)dlState.downloadedLen);
+                                        startPlaying = true;
+                                    }
+                                }
+
+                                // 3. Play audio chunk if buffering is complete and we have data
+                                if (startPlaying && playOffset < dlState.downloadedLen) {
+                                    size_t bytesAvailable = dlState.downloadedLen - playOffset;
+                                    if (bytesAvailable < 2) {
+                                        if (dlState.downloadComplete) {
+                                            playOffset = dlState.downloadedLen; // Discard trailing odd byte
+                                        } else {
+                                            delay(5);
+                                        }
+                                        continue;
+                                    }
+
+                                    size_t bytesToPlay = (bytesAvailable < CHUNK_SAMPLES * 2) ? bytesAvailable : CHUNK_SAMPLES * 2;
+                                    
+                                    // If still downloading, wait for full chunks to prevent micro-stutters
+                                    if (bytesToPlay < CHUNK_SAMPLES * 2 && !dlState.downloadComplete) {
+                                        delay(5);
+                                        continue;
+                                    }
+                                    
+                                    size_t samplesToPlay = bytesToPlay / 2;
+                                    if (samplesToPlay > 0) {
+                                        for (size_t i = 0; i < samplesToPlay; i++) {
+                                            int16_t sample;
+                                            memcpy(&sample, rspBuf + playOffset + i * 2, 2);
+                                            float boosted = sample * VOLUME_BOOST;
+                                            if (boosted >  32767) boosted =  32767;
+                                            if (boosted < -32768) boosted = -32768;
+                                            outBuf[i] = (int16_t)boosted;
+                                        }
+                                        GlobalSpeaker.playPCM((uint8_t*)outBuf, samplesToPlay * 2);
+                                        playOffset += samplesToPlay * 2;
                                     }
                                 } else {
-                                    delay(1);
+                                    // Caught up with download but download is not complete yet
+                                    if (dlState.downloadFailed) {
+                                        ESP_LOGE(TAG, "Audio download failed or timed out. Ending playback.");
+                                        break;
+                                    }
+                                    delay(5);
                                 }
                             }
 
-
-                        ESP_LOGI(TAG, "Received %d bytes of audio response", rspLen);
-
-                        // Find PCM data: walk WAV chunk tree to find 'data' sub-chunk
-                        // (handles non-standard headers with extra chunks before data)
-                        size_t pcmOffset = 0;
-                        if (rspLen >= 12 && memcmp(rspBuf, "RIFF", 4) == 0 && memcmp(rspBuf + 8, "WAVE", 4) == 0) {
-                            size_t pos = 12;
-                            while (pos + 8 <= rspLen) {
-                                uint32_t subChunkSize;
-                                memcpy(&subChunkSize, rspBuf + pos + 4, 4);
-                                if (memcmp(rspBuf + pos, "data", 4) == 0) {
-                                    pcmOffset = pos + 8;
-                                    ESP_LOGI(TAG, "WAV 'data' chunk found at offset %d", (int)pcmOffset);
-                                    break;
-                                }
-                                pos += 8 + subChunkSize;
-                            }
-                            if (pcmOffset == 0) {
-                                // Fallback: just skip standard 44-byte header
-                                pcmOffset = 44;
-                                ESP_LOGW(TAG, "WAV 'data' not found, defaulting to offset 44");
-                            }
-                        }
-
-                        // Apply volume boost and play in chunks
-                        const float VOLUME_BOOST = 3.5f;  // Increase for louder output (clamp prevents distortion)
-                        const size_t CHUNK_SAMPLES = 512;
-                        int16_t outBuf[CHUNK_SAMPLES];
-
-                        size_t offset = pcmOffset;
-                        while (offset + 2 <= rspLen) {
-                            size_t samplesAvail = (rspLen - offset) / 2;
-                            size_t samplesToPlay = (samplesAvail < CHUNK_SAMPLES) ? samplesAvail : CHUNK_SAMPLES;
-
-                            for (size_t i = 0; i < samplesToPlay; i++) {
-                                int16_t sample;
-                                memcpy(&sample, rspBuf + offset + i * 2, 2);
-                                float boosted = sample * VOLUME_BOOST;
-                                if (boosted >  32767) boosted =  32767;
-                                if (boosted < -32768) boosted = -32768;
-                                outBuf[i] = (int16_t)boosted;
+                            // Safety check: ensure background task has terminated before freeing buffer
+                            while (!dlState.downloadComplete) {
+                                delay(10);
                             }
 
-                            GlobalSpeaker.playPCM((uint8_t*)outBuf, samplesToPlay * 2);
-                            offset += samplesToPlay * 2;
-                        }
-
-                        heap_caps_free(rspBuf);
+                            ESP_LOGI(TAG, "Finished playback of %d bytes (downloaded %d bytes total in %lu ms)", 
+                                     (int)(playOffset - pcmOffset), (int)dlState.downloadedLen, millis() - dlStart);
+                            heap_caps_free(rspBuf);
                         } else {
-                            ESP_LOGE(TAG, "Failed to connect to server: %s", http.errorToString(httpResponseCode).c_str());
-                            is_conversation_active = false;
+                            ESP_LOGE(TAG, "Failed to allocate audio response buffer");
                         }
+
+                        // Reset speaker to default 16kHz for beep/tone sounds
+                        GlobalSpeaker.setSampleRate(16000);
+
+                    } else {
+                        ESP_LOGE(TAG, "HTTP error: %s", http.errorToString(httpResponseCode).c_str());
+                        is_conversation_active = false;
                     }
-                }
+                } // end payloadBuf else
                 http.end();
-            }
+            } // end http.begin else
         } else {
             ESP_LOGE(TAG, "WiFi not connected");
             is_conversation_active = false;
@@ -340,3 +469,4 @@ void conversationTask(void *param) {
         }
     }
 }
+

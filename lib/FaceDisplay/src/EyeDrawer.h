@@ -107,7 +107,7 @@ class EyeDrawer {
 
       if (corner == T_R) {
         for(x = 0, y = ry, s = 2 * ry2 + rx2 * (1 - 2 * ry); ry2 * x <= rx2 * y; x++) {
-          _u8g2->drawHLine(x0, y0 - y, x);
+          if (x > 0) _u8g2->drawHLine(x0, y0 - y, x);
           if(s >= 0) {
             s += fx2 * (1 - y);
             y--;
@@ -115,7 +115,7 @@ class EyeDrawer {
           s += ry2 * ((4 * x) + 6);
         }         
         for(x = rx, y = 0, s = 2 * rx2 + ry2 * (1 - 2 * rx); rx2 * y <= ry2 * x; y++) {
-          _u8g2->drawHLine(x0, y0 - y, x);
+          if (x > 0) _u8g2->drawHLine(x0, y0 - y, x);
           if (s >= 0) {
             s += fy2 * (1 - x);
             x--;
@@ -126,7 +126,7 @@ class EyeDrawer {
 
       else if (corner == B_R) {
         for (x = 0, y = ry, s = 2 * ry2 + rx2 * (1 - 2 * ry); ry2 * x <= rx2 * y; x++) {
-          _u8g2->drawHLine(x0, y0 + y -1, x);
+          if (x > 0) _u8g2->drawHLine(x0, y0 + y -1, x);
           if (s >= 0) {
             s += fx2 * (1 - y);
             y--;
@@ -134,7 +134,7 @@ class EyeDrawer {
           s += ry2 * ((4 * x) + 6);
         }
         for (x = rx, y = 0, s = 2 * rx2 + ry2 * (1 - 2 * rx); rx2 * y <= ry2 * x; y++) {
-          _u8g2->drawHLine(x0, y0 + y -1, x);
+          if (x > 0) _u8g2->drawHLine(x0, y0 + y -1, x);
           if (s >= 0) {
             s += fy2 * (1 - x);
             x--;
@@ -145,7 +145,7 @@ class EyeDrawer {
 
       else if (corner == T_L) {
         for (x = 0, y = ry, s = 2 * ry2 + rx2 * (1 - 2 * ry); ry2 * x <= rx2 * y; x++) {
-          _u8g2->drawHLine(x0-x, y0 - y, x);
+          if (x > 0) _u8g2->drawHLine(x0-x, y0 - y, x);
           if (s >= 0) {
             s += fx2 * (1 - y);
             y--;
@@ -153,7 +153,7 @@ class EyeDrawer {
           s += ry2 * ((4 * x) + 6);
         }
         for (x = rx, y = 0, s = 2 * rx2 + ry2 * (1 - 2 * rx); rx2 * y <= ry2 * x; y++) {
-          _u8g2->drawHLine(x0-x, y0 - y, x);
+          if (x > 0) _u8g2->drawHLine(x0-x, y0 - y, x);
           if (s >= 0) {
             s += fy2 * (1 - x);
             x--;
@@ -164,7 +164,7 @@ class EyeDrawer {
 
       else if (corner == B_L) {
         for (x = 0, y = ry, s = 2 * ry2 + rx2 * (1 - 2 * ry); ry2 * x <= rx2 * y; x++) {
-          _u8g2->drawHLine(x0-x, y0 + y - 1, x);
+          if (x > 0) _u8g2->drawHLine(x0-x, y0 + y - 1, x);
           if (s >= 0) {
             s += fx2 * (1 - y);
             y--;
@@ -172,7 +172,7 @@ class EyeDrawer {
           s += ry2 * ((4 * x) + 6);
         }
         for (x = rx, y = 0, s = 2 * rx2 + ry2 * (1 - 2 * rx); rx2 * y <= ry2 * x; y++) {
-          _u8g2->drawHLine(x0-x, y0 + y , x);
+          if (x > 0) _u8g2->drawHLine(x0-x, y0 + y , x);
           if (s >= 0) {
             s += fy2 * (1 - x);
             x--;
@@ -191,6 +191,7 @@ class EyeDrawer {
       int32_t b = max(y0, y1);
       int32_t w = r-l;
       int32_t h = b-t; 
+      if (w <= 0 || h <= 0) return;
       _u8g2->setDrawColor(color);
       _u8g2->drawBox(l, t, w, h);
       _u8g2->setDrawColor(1);

@@ -3,8 +3,8 @@
 
 static const char* TAG = "WIFI";
 
-const char* ssid = "ajay-admin2.4";
-const char* password = "sush@mush";
+const char* ssid = "Nothing10x";
+const char* password = "qwert123";
 
 void setupWiFi() {
     ESP_LOGI(TAG, "Connecting to WiFi: %s", ssid);
@@ -24,3 +24,4 @@ void setupWiFi() {
         ESP_LOGE(TAG, "WiFi connection failed!");
     }
 }
+ 

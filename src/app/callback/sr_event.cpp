@@ -7,9 +7,6 @@ void sr_event_callback(void *arg, sr_event_t event, int command_id, int phrase_i
     switch (event) {
         case SR_EVENT_WAKEWORD:
             Serial.println("🎙️ Wake word 'Hi ESP' detected!");
-#ifdef ENABLE_SPEAKER_FEEDBACK
-            GlobalSpeaker.playChime();
-#endif
             // Trigger conversation task
             if (convTaskHandle != nullptr) {
                 xTaskNotifyGive(convTaskHandle);
@@ -18,9 +15,6 @@ void sr_event_callback(void *arg, sr_event_t event, int command_id, int phrase_i
 
         case SR_EVENT_WAKEWORD_CHANNEL:
             Serial.printf("🎙️ Wake word detected on channel: %d\n", command_id);
-#ifdef ENABLE_SPEAKER_FEEDBACK
-            GlobalSpeaker.playChime();
-#endif
             if (convTaskHandle != nullptr) {
                 xTaskNotifyGive(convTaskHandle);
             }
