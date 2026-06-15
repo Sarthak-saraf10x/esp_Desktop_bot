@@ -23,7 +23,7 @@ void runTasks(){
 	xTaskCreateUniversal(
 		conversationTask,
 		"convTask",
-		1024 * 8, // Need more stack for HTTPClient and PSRAM allocation
+		1024 * 12, // Need more stack for WebSockets, ArduinoJson, and PSRAM allocation
 		NULL,
 		3,
 		&convTaskHandle,
