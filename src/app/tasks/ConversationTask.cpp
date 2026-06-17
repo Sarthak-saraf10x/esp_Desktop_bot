@@ -269,6 +269,22 @@ void conversationTask(void* param) {
             continue;
         }
 
+        // Wait a brief moment for any speaker audio residue/reverb to completely decay
+        vTaskDelay(pdMS_TO_TICKS(200));
+
+        // Flush stale/buffered audio from the microphone DMA/queue (e.g., greeting/beep sounds)
+        uint8_t flushBuf[MIC_CHUNK_BYTES];
+        size_t flushGot = 0;
+        int flushedChunks = 0;
+        while (true) {
+            microphone->read(flushBuf, sizeof(flushBuf), &flushGot, 0);
+            if (flushGot == 0) break;
+            flushedChunks++;
+        }
+        if (flushedChunks > 0) {
+            ESP_LOGI(TAG, "Flushed %d stale microphone chunks from DMA", flushedChunks);
+        }
+
         // ── Record + Stream PCM over WebSocket ─────────────────────────────
         ESP_LOGI(TAG, "======================================");
         ESP_LOGI(TAG, "     [ BOT IS LISTENING... ]         ");
