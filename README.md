@@ -7,11 +7,7 @@
 [![LLM](https://img.shields.io/badge/brain-Google%20Gemini-violet.svg)](https://ai.google.dev/)
 
 <p align="center">
-<<<<<<< HEAD
   <img src="images/esp.jpg" alt="ESP32-S3 AI Desktop Bot Form Factor" width="500">
-=======
-  <img src="images/final_model.jpg" alt="ESP32-S3 AI Desktop Bot Form Factor" width="500">
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
 </p>
 
 ---
@@ -55,33 +51,21 @@ sequenceDiagram
     participant BE as [FastAPI Backend Server]
     participant Gemini as [Google Gemini LLM Agent]
     participant MCP as [Persistent MCP Tools]
-<<<<<<< HEAD
     participant TTS as [Piper TTS & Resampler]
-=======
-    participant TTS as [Piper TTS + Resampler]
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
 
     %% Phase 1: Wake & Start
     Note over User, ESP_C0: Phase 1: Activation
     ESP_C0->>ESP_C0: WakeNet detects local wake word "Hi ESP"
     ESP_C0->>ESP_C1: Play greeting chime
     ESP_C0->>ESP_C0: Pause wake-word engine (sr_pause)
-<<<<<<< HEAD
     ESP_C0->>BE: Establish WebSocket to /ws/conversation with Auth headers
-=======
-    ESP_C0->>BE: Establish WebSocket to `/ws/conversation` with Auth headers
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
 
     %% Phase 2: Recording & Streaming
     Note over User, BE: Phase 2: Audio Ingestion
     loop While User is Speaking (Max 15 seconds)
         ESP_C0->>ESP_C0: Read 1024-byte raw PCM chunk from I2S Mic (16kHz)
         ESP_C0->>BE: Stream binary audio frame over WebSocket
-<<<<<<< HEAD
         BE->>BE: Accumulate bytes in memory pcm_buffer
-=======
-        BE->>BE: Accumulate bytes in memory `pcm_buffer`
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
         ESP_C0->>ESP_C0: Run local VAD: measure peak amplitude
     end
     Note over ESP_C0: User stops speaking for 1.0 second (silence timer)
@@ -90,19 +74,11 @@ sequenceDiagram
 
     %% Phase 3: Backend Processing & LLM Tool Loop
     Note over BE, Gemini: Phase 3: AI Inference & Tool Loop
-<<<<<<< HEAD
     BE->>BE: Transcribe pcm_buffer using Whisper (tiny.en)
     BE->>ESP_C0: Send {"event": "transcript", "text": "..."}
     BE->>Gemini: Pass text query + chat history (SDK: google-genai)
     
     opt When Gemini decides tools are needed (e.g. Clipboard, Web Search, Weather)
-=======
-    BE->>BE: Transcribe `pcm_buffer` using Whisper (tiny.en)
-    BE->>ESP_C0: Send {"event": "transcript", "text": "..."}
-    BE->>Gemini: Pass text query + chat history (SDK: google-genai)
-    
-    opt When Gemini decides tools are needed (e.g., Clipboard, Web Search, Weather)
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
         Gemini->>BE: Request tool call (function_calls)
         BE->>MCP: Execute tool on persistent MCP Session
         MCP-->>BE: Return tool output
@@ -114,22 +90,14 @@ sequenceDiagram
     %% Phase 4: TTS & Playback
     Note over BE, ESP_C1: Phase 4: Output Synthesis & Playback
     loop Stream Response Sentences
-<<<<<<< HEAD
         BE->>BE: Group tokens into sentences split by punctuation
-=======
-        BE->>BE: Group tokens into sentences (split on `.?!,;:`)
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
         BE->>TTS: Synthesize sentence using Piper (22.05kHz PCM)
         TTS->>TTS: Resample to 16kHz using NumPy interpolation
         TTS->>BE: Return 16kHz mono PCM chunks
         BE->>ESP_C0: Stream binary audio chunks over WebSocket
         ESP_C0->>PSRAM: Buffer chunks into 1 MB ring buffer (ringWrite)
         
-<<<<<<< HEAD
         Note over ESP_C0: When buffer has >= 16KB (pre-buffer) or stream done
-=======
-        Note over ESP_C0: When buffer has >=16KB (pre-buffer) or stream done:
->>>>>>> df5e051b227f70f5a7936dc8edb495800cb7489a
         ESP_C0->>ESP_C1: Spawn audioPlaybackTask
         loop Playback
             ESP_C1->>PSRAM: Read PCM bytes (ringRead)
