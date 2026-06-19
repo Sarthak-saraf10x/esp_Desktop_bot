@@ -83,7 +83,7 @@ void setupFaceDisplay(uint16_t size) {
 void setupSpeechRecognition() {
 	void* mic_instance = nullptr;
 
-	Serial.println("🧠 Setting up Speech Recognition system...");
+	Serial.println(" Setting up Speech Recognition system...");
 
 	// Start ESP-SR system with high-level API
 	esp_err_t ret = SR::sr_setup(
@@ -99,10 +99,10 @@ void setupSpeechRecognition() {
 
 	if (ret == ESP_OK) {
 		sr_system_running = true;
-		Serial.println("✅ Speech Recognition started successfully!");
-		Serial.println("🎯 Say 'Hi ESP' to activate");
+		Serial.println(" Speech Recognition started successfully!");
+		Serial.println(" Say 'Hi ESP' to activate");
 		Serial.println("");
-		Serial.printf("📋 Loaded %d voice commands:\n", sizeof(voice_commands) / sizeof(sr_cmd_t));
+		Serial.printf(" Loaded %d voice commands:\n", sizeof(voice_commands) / sizeof(sr_cmd_t));
 		for (int i = 0; i < (sizeof(voice_commands) / sizeof(sr_cmd_t)); i++) {
 			Serial.printf("   [%d] Group %d: '%s' -> '%s'\n",
 						i,
@@ -113,7 +113,7 @@ void setupSpeechRecognition() {
 
 		SR::sr_start(0, 1);
 	} else {
-		Serial.printf("❌ Failed to start Speech Recognition: %s\n", esp_err_to_name(ret));
+		Serial.printf(" Failed to start Speech Recognition: %s\n", esp_err_to_name(ret));
 		sr_system_running = false;
 	}
 }
