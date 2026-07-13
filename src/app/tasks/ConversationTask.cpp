@@ -36,15 +36,16 @@ bool is_conversation_active = false;
 
 // ── Recording Config ─────────────────────────────────────────────────────────
 #define SAMPLE_RATE         16000
-#define MAX_REC_DURATION_MS (15 * 1000)
+#define MAX_REC_DURATION_MS (30 * 1000)
 #define SILENCE_THRESHOLD   600
-#define END_SILENCE_MS      1000
+#define END_SILENCE_MS      2000
 #define INITIAL_SILENCE_MS  5000
 #define MIC_CHUNK_BYTES     1024   // ~32 ms of audio per WS frame
 
 // ── Ring Buffer Config (audio output) ───────────────────────────────────────
 #define RING_BUF_SIZE     (1024 * 1024)  // 1 MB in PSRAM (~32 s of audio)
-#define PRE_BUFFER_BYTES  (16  * 1024)   // Start playing after 16 KB (~0.5 s)
+#define PRE_BUFFER_BYTES  (96  * 1024)   // Start playing after 96 KB (~3.0 s)
+
 
 // ── Ring Buffer State ────────────────────────────────────────────────────────
 static uint8_t*         g_ringBuf       = nullptr;
@@ -92,6 +93,8 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
         case WStype_DISCONNECTED:
             g_wsConnected = false;
             ESP_LOGW(TAG, "[WS] Disconnected — will auto-reconnect");
+            g_audioStreamDone = true;
+            g_endConvo = true;
             break;
 
         case WStype_BIN:
@@ -105,34 +108,37 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 
         case WStype_TEXT: {
             // JSON control frame from backend
-            StaticJsonDocument<256> doc;
+            JsonDocument doc;
             DeserializationError err = deserializeJson(doc, payload, length);
             if (err) {
                 ESP_LOGW(TAG, "[WS] JSON parse error: %s", err.c_str());
                 break;
             }
-            const char* ev = doc["event"] | "";
+            const char* ev = doc["event"] | doc["status"] | "";
             ESP_LOGI(TAG, "[WS] Event: %s", ev);
 
-            if (strcmp(ev, "audio_done") == 0) {
+            if (strcmp(ev, "audio_done") == 0 || strcmp(ev, "end_response") == 0) {
                 g_audioStreamDone = true;
                 g_endConvo = doc["end_conversation"] | false;
                 ESP_LOGI(TAG, "[WS] Audio stream done (end_convo=%d)", (int)g_endConvo);
-            } else if (strcmp(ev, "transcript") == 0) {
+            } else if (strcmp(ev, "transcript") == 0 || strcmp(ev, "transcription") == 0) {
                 ESP_LOGI(TAG, "[WS] Transcript: %s", doc["text"] | "(empty)");
-            } else if (strcmp(ev, "no_speech") == 0) {
-                // Backend heard nothing — signal done so we resume quickly
+            } else if (strcmp(ev, "no_speech") == 0 || strcmp(ev, "no_speech_detected") == 0 || (strcmp(ev, "done") == 0 && strcmp(doc["reason"] | "", "no_speech_detected") == 0)) {
+                // Backend heard nothing — signal done and end conversation so we go to idle state
                 g_audioStreamDone = true;
-                g_endConvo = false;
+                g_endConvo = true;
             } else if (strcmp(ev, "error") == 0) {
                 ESP_LOGE(TAG, "[WS] Server error: %s", doc["message"] | "unknown");
                 g_audioStreamDone = true;
+                g_endConvo = true;
             }
             break;
         }
 
         case WStype_ERROR:
             ESP_LOGE(TAG, "[WS] Socket error");
+            g_audioStreamDone = true;
+            g_endConvo = true;
             break;
 
         default:
@@ -175,8 +181,10 @@ static void audioPlaybackTask(void* param) {
                 ESP_LOGI(TAG, "[Play] Ring buffer drained — playback complete");
                 break;
             }
-            // Waiting for more data from network
-            vTaskDelay(pdMS_TO_TICKS(5));
+            // Buffer underrun — pause and re-enter pre-buffering state to avoid stuttering
+            ESP_LOGW(TAG, "[Play] Buffer underrun — pausing to re-buffer...");
+            startedPlaying = false;
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
@@ -230,6 +238,9 @@ void conversationTask(void* param) {
             uint32_t notif = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
             if (notif != 1) continue;  // Keep looping g_ws.loop() while idle
 
+            // Pause SR immediately to avoid speaker feedback or double wake-up trigger
+            SR::sr_pause();
+
             is_conversation_active = true;
             ESP_LOGI(TAG, "Conversation started!");
 
@@ -243,11 +254,10 @@ void conversationTask(void* param) {
             GlobalSpeaker.playPCM(GREETINGS_LIST[greetIdx].data,
                                   GREETINGS_LIST[greetIdx].length);
         } else {
+            // Pause SR immediately before beep to prevent double triggers during beep sound
+            SR::sr_pause();
             GlobalSpeaker.beep();
         }
-
-        // ── Pause wake-word SR ─────────────────────────────────────────────
-        SR::sr_pause();
 
         // ── Display: Listening ─────────────────────────────────────────────
         g_displayState = 1;
@@ -402,6 +412,10 @@ void conversationTask(void* param) {
         if (!is_conversation_active) {
             g_displayState = 0;
             if (faceDisplay) faceDisplay->Expression.GoTo_Normal();
+            
+            // Consume and clear any stale task notifications before resuming speech recognition
+            ulTaskNotifyTake(pdTRUE, 0);
+            
             SR::sr_resume();
             ESP_LOGI(TAG, "Conversation ended — SR resumed");
         }

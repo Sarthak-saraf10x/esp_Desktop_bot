@@ -42,7 +42,7 @@ Unlike traditional voice assistants (e.g., Alexa, Siri) that rely on slow, seque
 ### 1. Input Audio Capture (Edge)
 * **MEMS Microphone:** An INMP441 microphone captures audio signals and digitizes them using an internal delta-sigma ADC. 
 * **I2S Configuration:** Streamed over I2S (Inter-IC Sound) mono channel at $16,000\text{ Hz}$ sampling rate with $16\text{-bit}$ resolution.
-* **On-Device VAD:** Core 0 measures the peak amplitude of each $32\text{ ms}$ chunk. If the amplitude drops below 600 (`SILENCE_THRESHOLD`) for more than $1.0\text{ s}$ (`END_SILENCE_MS`) after active speech, the loop breaks and a JSON control frame `{"event": "speech_done"}` is transmitted.
+* **On-Device VAD:** Core 0 measures the peak amplitude of each $32\text{ ms}$ chunk. If the amplitude drops below 600 (`SILENCE_THRESHOLD`) for more than $4.0\text{ s}$ (`END_SILENCE_MS`) after active speech, the loop breaks and a JSON control frame `{"event": "speech_done"}` is transmitted.
 
 ### 2. Bidirectional WebSocket Layer
 * **Multiplexed Connection:** Operates over a single persistent WebSocket endpoint (`/ws/conversation`).
@@ -116,7 +116,7 @@ The physical model is built around the **ESP32-S3-DevKitC-1-N16R8** connected to
 2. Clone the repository and open the `ESP32s3-Desktop_Bot` directory in VS Code.
 3. Edit `src/boot/wifi_manager.cpp` (or `src/app/tasks/ConversationTask.cpp`) to set up your network and server configurations:
    ```cpp
-   #define SERVER_HOST "192.168.1.9" // Change to your local backend server IP
+   #define SERVER_HOST "10.211.100.156" // Change to your local backend server IP
    #define SERVER_PORT 5000
    ```
 4. Verify your I2S and I2C pin declarations in `include/app_config.h`.
@@ -164,18 +164,18 @@ The end-to-end voice-to-voice conversation latency benchmarked over a stable Wi-
 
 ```
 [0.00s] User stops speaking
-[1.00s] VAD Silence Window (ESP32-S3 waits 1.0s to confirm end-of-speech)
-[1.02s] VAD Transmit (ESP32-S3 transmits JSON "speech_done" control packet)
-[1.05s] Network Uplink (Packet travels over Wi-Fi to FastAPI server)
-[1.50s] transcription (Faster-Whisper processes final PCM buffer)
-[1.95s] LLM Reasoning & Tool Call (Gemini agent processes text and returns reply)
-[2.23s] TTS Generation (Piper synthesizes the first sentence to 22.05 kHz PCM)
-[2.25s] Linear Resampling (NumPy resamples audio to 16 kHz in memory)
-[2.28s] Network Downlink (FastAPI streams the first binary audio frame)
-[2.78s] ESP32 Pre-buffering (Core 1 buffers 16KB of audio to prevent jitter)
-[2.79s] Audio Playback (Speaker plays the first sound sample)
+[4.00s] VAD Silence Window (ESP32-S3 waits 4.0s to confirm end-of-speech)
+[4.02s] VAD Transmit (ESP32-S3 transmits JSON "speech_done" control packet)
+[4.05s] Network Uplink (Packet travels over Wi-Fi to FastAPI server)
+[4.50s] transcription (Faster-Whisper processes final PCM buffer)
+[4.95s] LLM Reasoning & Tool Call (Gemini agent processes text and returns reply)
+[5.23s] TTS Generation (Piper synthesizes the first sentence to 22.05 kHz PCM)
+[5.25s] Linear Resampling (NumPy resamples audio to 16 kHz in memory)
+[5.28s] Network Downlink (FastAPI streams the first binary audio frame)
+[5.78s] ESP32 Pre-buffering (Core 1 buffers 16KB of audio to prevent jitter)
+[5.79s] Audio Playback (Speaker plays the first sound sample)
 ========================================================================
-Total Latency (including VAD wait): ~2.79 seconds
+Total Latency (including VAD wait): ~5.79 seconds
 Net System Processing Delay (excluding VAD wait): ~1.79 seconds
 ```
 
